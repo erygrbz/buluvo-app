@@ -1,6 +1,5 @@
 name: Buluvo APK Derle
 
-# Her push'ta ve elle tetiklemede çalışır
 on:
   push:
   workflow_dispatch:
@@ -12,11 +11,22 @@ jobs:
       - name: Kodu al
         uses: actions/checkout@v4
 
+      - name: Java 17 kur (Flutter/Gradle uyumu için)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Flutter kur
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
           channel: stable
+
+      - name: Sürümleri göster (teşhis)
+        run: |
+          java -version
+          flutter --version
 
       - name: Flutter proje iskeletini oluştur (android klasörü vb.)
         run: flutter create --org com.buluvo --project-name buluvo --platforms=android .
