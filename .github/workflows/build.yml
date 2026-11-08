@@ -1,0 +1,38 @@
+name: Buluvo APK Derle
+
+# Her push'ta ve elle tetiklemede çalışır
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v4
+
+      - name: Flutter kur
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+
+      - name: Flutter proje iskeletini oluştur (android klasörü vb.)
+        run: flutter create --org com.buluvo --project-name buluvo --platforms=android .
+
+      - name: Kendi ekranımızı yerleştir
+        run: cp custom/main.dart lib/main.dart
+
+      - name: Paketleri indir
+        run: flutter pub get
+
+      - name: APK derle (release)
+        run: flutter build apk --release
+
+      - name: APK'yı yükle (indirilebilir çıktı)
+        uses: actions/upload-artifact@v4
+        with:
+          name: buluvo-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
