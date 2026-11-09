@@ -62,12 +62,10 @@ jobs:
           groovy = glob.glob('android/app/build.gradle')
           if kts:
               f = kts[0]; s = open(f).read()
-              top = ('import java.util.Properties\n'
-                     'import java.io.FileInputStream\n'
-                     'val keystoreProperties = Properties()\n'
-                     'val keystorePropertiesFile = rootProject.file("key.properties")\n'
-                     'if (keystorePropertiesFile.exists()) { FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) } }\n\n')
-              s = top + s
+              # props + signingConfigs, hepsi 'android {' noktasına; plugins{} ÖNCESİNE statement KOYMA
+              props = ('val keystoreProperties = java.util.Properties()\n'
+                       'val keystorePropertiesFile = rootProject.file("key.properties")\n'
+                       'if (keystorePropertiesFile.exists()) { java.io.FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) } }\n\n')
               sign = ('android {\n'
                       '    signingConfigs {\n'
                       '        create("release") {\n'
@@ -77,15 +75,14 @@ jobs:
                       '            storePassword = keystoreProperties["storePassword"] as String\n'
                       '        }\n'
                       '    }')
-              s = s.replace('android {', sign, 1)
+              s = s.replace('android {', props + sign, 1)
               s = s.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
               open(f, 'w').write(s); print('KTS imza eklendi')
           elif groovy:
               f = groovy[0]; s = open(f).read()
-              top = ('def keystoreProperties = new Properties()\n'
-                     'def keystorePropertiesFile = rootProject.file("key.properties")\n'
-                     'if (keystorePropertiesFile.exists()) { keystorePropertiesFile.withInputStream { keystoreProperties.load(it) } }\n\n')
-              s = top + s
+              props = ('def keystoreProperties = new Properties()\n'
+                       'def keystorePropertiesFile = rootProject.file("key.properties")\n'
+                       'if (keystorePropertiesFile.exists()) { keystorePropertiesFile.withInputStream { keystoreProperties.load(it) } }\n\n')
               sign = ('android {\n'
                       '    signingConfigs {\n'
                       '        release {\n'
@@ -95,7 +92,7 @@ jobs:
                       '            storePassword keystoreProperties["storePassword"]\n'
                       '        }\n'
                       '    }')
-              s = s.replace('android {', sign, 1)
+              s = s.replace('android {', props + sign, 1)
               s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
               open(f, 'w').write(s); print('Groovy imza eklendi')
           else:
