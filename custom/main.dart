@@ -127,6 +127,73 @@ class Api {
     } catch (e) { return null; }
   }
 
+  /// /_api/sohbetler -> List<Sohbet> (gerçek eşleşmeler) veya null
+  static Future<List<Sohbet>?> sohbetlerYukle() async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return null;
+      final r = await http
+          .get(Uri.parse("$kBase/_api/sohbetler"), headers: {"Authorization": "Bearer $t", "accept": "application/json"})
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(r.body);
+      if (j is Map && j["ok"] == true && j["liste"] is List) {
+        final grad = [
+          [const Color(0xFFF0ABFC), const Color(0xFFA855F7)],
+          [const Color(0xFFFDA4AF), const Color(0xFFFB7185)],
+          [const Color(0xFF6EE7B7), const Color(0xFF10B981)],
+          [const Color(0xFFFCD34D), const Color(0xFFF59E0B)],
+        ];
+        final out = <Sohbet>[];
+        int i = 0;
+        for (final e in (j["liste"] as List)) {
+          if (e is! Map) continue;
+          final ad = (e["ad"] ?? "").toString();
+          final harf = ad.trim().isNotEmpty ? ad.trim()[0].toUpperCase() : "?";
+          final foto = e["foto"] == null ? null : "$kBase${e["foto"]}";
+          final son = (e["son"] ?? "").toString();
+          out.add(Sohbet(ad, harf, grad[i % grad.length], son.isEmpty ? [] : [Mesaj(son, false)],
+              mid: e["mid"]?.toString(), foto: foto));
+          i++;
+        }
+        return out;
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+
+  /// /_api/mesajlar?m=<mid> -> List<Mesaj> veya null
+  static Future<List<Mesaj>?> mesajlarYukle(String mid) async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return null;
+      final r = await http
+          .get(Uri.parse("$kBase/_api/mesajlar?m=${Uri.encodeQueryComponent(mid)}"), headers: {"Authorization": "Bearer $t", "accept": "application/json"})
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(r.body);
+      if (j is Map && j["ok"] == true && j["liste"] is List) {
+        return [for (final e in (j["liste"] as List)) if (e is Map) Mesaj((e["metin"] ?? "").toString(), e["benim"] == true)];
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+
+  /// /_api/mesaj-gonder -> true/false
+  static Future<bool> mesajGonder(String mid, String metin) async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return false;
+      final r = await http
+          .post(Uri.parse("$kBase/_api/mesaj-gonder"),
+              headers: {"Authorization": "Bearer $t", "content-type": "application/json"},
+              body: jsonEncode({"m": mid, "metin": metin}))
+          .timeout(const Duration(seconds: 12));
+      final j = jsonDecode(r.body);
+      return j is Map && j["ok"] == true;
+    } catch (e) { return false; }
+  }
+
   static Future<void> cikis() async {
     try {
       final t = await token();
@@ -166,8 +233,10 @@ class Sohbet {
   final String ad;
   final String harf;
   final List<Color> renk;
+  final String? mid;
+  final String? foto;
   final ValueNotifier<List<Mesaj>> mesajlar;
-  Sohbet(this.ad, this.harf, this.renk, List<Mesaj> ilk) : mesajlar = ValueNotifier<List<Mesaj>>(ilk);
+  Sohbet(this.ad, this.harf, this.renk, List<Mesaj> ilk, {this.mid, this.foto}) : mesajlar = ValueNotifier<List<Mesaj>>(ilk);
 }
 
 class Durum {
@@ -781,45 +850,87 @@ class _BegenenlerSayfasiState extends State<BegenenlerSayfasi> {
 // ============================================================
 // SOHBET (liste)
 // ============================================================
-class SohbetSayfasi extends StatelessWidget {
+class SohbetSayfasi extends StatefulWidget {
   const SohbetSayfasi({super.key});
+  @override
+  State<SohbetSayfasi> createState() => _SohbetSayfasiState();
+}
+
+class _SohbetSayfasiState extends State<SohbetSayfasi> {
+  List<Sohbet> _liste = durum.sohbetler;
+  bool _yuklendi = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.sohbetlerYukle().then((g) {
+      if (g != null && mounted) setState(() { _liste = g; _yuklendi = true; });
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         const _BaslikBar(baslik: 'Sohbet'),
         Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: durum.sohbetler.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) {
-              final s = durum.sohbetler[i];
-              return GestureDetector(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SohbetDetay(sohbet: s))),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(18), border: Border.all(color: kBorder)),
-                  child: Row(children: [
-                    _Harf(harf: s.harf, renk: s.renk),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(s.ad, style: const TextStyle(fontWeight: FontWeight.w800, color: kText, fontSize: 15)),
-                      const SizedBox(height: 3),
-                      ValueListenableBuilder<List<Mesaj>>(
-                        valueListenable: s.mesajlar,
-                        builder: (_, m, __) => Text(m.isEmpty ? '' : m.last.metin,
-                            maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kMuted, fontSize: 13)),
+          child: (_yuklendi && _liste.isEmpty)
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(28),
+                    child: Text('Henüz eşleşmen yok.\nKeşfet’ten beğenmeye başla 💜',
+                        textAlign: TextAlign.center, style: TextStyle(color: kMuted, fontSize: 15, height: 1.5)),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _liste.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (_, i) {
+                    final s = _liste[i];
+                    return GestureDetector(
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SohbetDetay(sohbet: s))),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(18), border: Border.all(color: kBorder)),
+                        child: Row(children: [
+                          _SohbetAvatar(s: s),
+                          const SizedBox(width: 12),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(s.ad, style: const TextStyle(fontWeight: FontWeight.w800, color: kText, fontSize: 15)),
+                            const SizedBox(height: 3),
+                            ValueListenableBuilder<List<Mesaj>>(
+                              valueListenable: s.mesajlar,
+                              builder: (_, m, __) => Text(m.isEmpty ? '' : m.last.metin,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kMuted, fontSize: 13)),
+                            ),
+                          ])),
+                        ]),
                       ),
-                    ])),
-                  ]),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
         ),
       ],
     );
+  }
+}
+
+class _SohbetAvatar extends StatelessWidget {
+  final Sohbet s;
+  const _SohbetAvatar({required this.s});
+  @override
+  Widget build(BuildContext context) {
+    if (s.foto != null) {
+      return ClipOval(
+        child: SizedBox(
+          width: 52, height: 52,
+          child: Image.network(s.foto!, fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _Harf(harf: s.harf, renk: s.renk)),
+        ),
+      );
+    }
+    return _Harf(harf: s.harf, renk: s.renk);
   }
 }
 
@@ -834,15 +945,35 @@ class _SohbetDetayState extends State<SohbetDetay> {
   final _kontrol = TextEditingController();
   final _kaydir = ScrollController();
 
+  @override
+  void initState() {
+    super.initState();
+    final mid = widget.sohbet.mid;
+    if (mid != null) {
+      Api.mesajlarYukle(mid).then((m) {
+        if (m != null && mounted) {
+          widget.sohbet.mesajlar.value = m;
+          _enAlta();
+        }
+      });
+    }
+  }
+
+  void _enAlta() {
+    Future.delayed(const Duration(milliseconds: 80), () {
+      if (_kaydir.hasClients) _kaydir.animateTo(_kaydir.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+    });
+  }
+
   void _gonder() {
     final t = _kontrol.text.trim();
     if (t.isEmpty) return;
     final liste = List<Mesaj>.from(widget.sohbet.mesajlar.value)..add(Mesaj(t, true));
     widget.sohbet.mesajlar.value = liste;
     _kontrol.clear();
-    Future.delayed(const Duration(milliseconds: 50), () {
-      if (_kaydir.hasClients) _kaydir.animateTo(_kaydir.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
-    });
+    final mid = widget.sohbet.mid;
+    if (mid != null) Api.mesajGonder(mid, t); // gerçek gönder (arka planda)
+    _enAlta();
   }
 
   @override
