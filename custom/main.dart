@@ -1,4 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 void main() => runApp(const BuluvoApp());
 
@@ -17,7 +21,64 @@ const kPembe = Color(0xFFEC4899);
 const kGrad = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [kMor, kPembe]);
 
 // ============================================================
-// UYGULAMA DURUMU (bellek içi — API bağlanınca buradan beslenecek)
+// SUNUCU / API
+//   Gerçek giriş: /_api/token-al (mevcut giriş sayfası, Google+şifre)
+//   token -> sessions -> her istekte Authorization: Bearer
+// ============================================================
+class Api {
+  static const kBase = "https://buluvo.com";
+  static const _anahtar = "blv_token";
+
+  static Future<String?> token() async {
+    try { final p = await SharedPreferences.getInstance(); return p.getString(_anahtar); } catch (e) { return null; }
+  }
+
+  static Future<void> tokenKaydet(String t) async {
+    try { final p = await SharedPreferences.getInstance(); await p.setString(_anahtar, t); } catch (e) {}
+  }
+
+  static Future<void> tokenSil() async {
+    try { final p = await SharedPreferences.getInstance(); await p.remove(_anahtar); } catch (e) {}
+  }
+
+  /// /_api/ozet -> durum'u gerçek veriyle doldurur. Başarılıysa true.
+  static Future<bool> ozetYukle() async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return false;
+      final r = await http
+          .get(Uri.parse("$kBase/_api/ozet"), headers: {"Authorization": "Bearer $t", "accept": "application/json"})
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return false;
+      final j = jsonDecode(r.body);
+      if (j is Map && j["ok"] == true) {
+        if (j["jeton"] != null) durum.jeton.value = (j["jeton"] as num).toInt();
+        if (j["ad"] is String && (j["ad"] as String).trim().isNotEmpty) durum.ad.value = j["ad"];
+        if (j["harf"] is String && (j["harf"] as String).trim().isNotEmpty) durum.harf.value = j["harf"];
+        if (j["begenenSayisi"] != null) durum.begenenSayisi.value = (j["begenenSayisi"] as num).toInt();
+        if (j["begenenlerAcik"] == true) durum.begenenlerAcik.value = true;
+        durum.gercek.value = true;
+        return true;
+      }
+      return false;
+    } catch (e) { return false; }
+  }
+
+  static Future<void> cikis() async {
+    try {
+      final t = await token();
+      if (t != null) {
+        await http
+            .post(Uri.parse("$kBase/_api/cikis"), headers: {"Authorization": "Bearer $t"})
+            .timeout(const Duration(seconds: 8));
+      }
+    } catch (e) {}
+    await tokenSil();
+  }
+}
+
+// ============================================================
+// UYGULAMA DURUMU (bellek içi; API bağlanınca gerçek veriyle dolar)
 // ============================================================
 class Kisi {
   final String ad;
@@ -43,18 +104,16 @@ class Sohbet {
   final List<Color> renk;
   final ValueNotifier<List<Mesaj>> mesajlar;
   Sohbet(this.ad, this.harf, this.renk, List<Mesaj> ilk) : mesajlar = ValueNotifier<List<Mesaj>>(ilk);
-  String get sonMesaj => mesajlar.value.isEmpty ? '' : mesajlar.value.last.metin;
 }
 
 class Durum {
-  // Jeton bakiyesi
   final jeton = ValueNotifier<int>(120);
-  // Beğenenler kilidi açık mı
+  final ad = ValueNotifier<String>("Eray");
+  final harf = ValueNotifier<String>("E");
+  final begenenSayisi = ValueNotifier<int>(12);
   final begenenlerAcik = ValueNotifier<bool>(false);
-  // Seni beğenenler sayısı
-  final begenenSayisi = 12;
+  final gercek = ValueNotifier<bool>(false); // gerçek veriye bağlı mı
 
-  // Keşfet destesi
   final deste = const <Kisi>[
     Kisi('Elif', 24, 'İzmir', '3 km uzakta', 92, true, ['🎵 Müzik', '✈️ Seyahat', '☕ Kahve'], [Color(0xFFF0ABFC), Color(0xFFA855F7)]),
     Kisi('Deniz', 27, 'İstanbul', '8 km uzakta', 88, false, ['📚 Kitap', '🎬 Sinema', '🏃 Spor'], [Color(0xFFFDA4AF), Color(0xFFFB7185)]),
@@ -63,7 +122,6 @@ class Durum {
     Kisi('Ece', 26, 'Antalya', '2 km uzakta', 87, false, ['💃 Dans', '🏖️ Deniz', '🎧 Podcast'], [Color(0xFF93C5FD), Color(0xFF6366F1)]),
   ];
 
-  // Sohbetler
   late final List<Sohbet> sohbetler = [
     Sohbet('Elif', 'E', const [Color(0xFFF0ABFC), Color(0xFFA855F7)], const [
       Mesaj('Selam! Profilin çok ilgimi çekti 😊', false),
@@ -101,7 +159,40 @@ class BuluvoApp extends StatelessWidget {
         fontFamily: 'Roboto',
         useMaterial3: true,
       ),
-      home: const GirisEkrani(),
+      home: const Baslangic(),
+    );
+  }
+}
+
+// Açılışta token varsa doğrudan ana ekrana, yoksa girişe.
+class Baslangic extends StatefulWidget {
+  const Baslangic({super.key});
+  @override
+  State<Baslangic> createState() => _BaslangicState();
+}
+
+class _BaslangicState extends State<Baslangic> {
+  @override
+  void initState() {
+    super.initState();
+    _kontrol();
+  }
+
+  Future<void> _kontrol() async {
+    final t = await Api.token();
+    if (!mounted) return;
+    if (t != null && t.isNotEmpty) {
+      Api.ozetYukle();
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AnaKabuk()));
+    } else {
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const GirisEkrani()));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: CircularProgressIndicator(color: kMor)),
     );
   }
 }
@@ -138,7 +229,7 @@ class GirisEkrani extends StatelessWidget {
                         style: TextStyle(fontSize: 38, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1)),
                   ),
                   const SizedBox(height: 8),
-                  const Text('Tekrar hoş geldin', style: TextStyle(fontSize: 16, color: kMuted, fontWeight: FontWeight.w600)),
+                  const Text('Google veya e-posta ile güvenli giriş', style: TextStyle(fontSize: 15, color: kMuted, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 26),
                   Container(
                     padding: const EdgeInsets.all(18),
@@ -173,21 +264,22 @@ class GirisEkrani extends StatelessWidget {
                     text: 'Google ile devam et', onTap: () => _gir(context),
                   ),
                   const SizedBox(height: 14),
-                  const _Alan(hint: 'E-posta adresin'),
-                  const SizedBox(height: 12),
-                  const _Alan(hint: 'Şifren', obscure: true),
-                  const SizedBox(height: 16),
                   GestureDetector(
                     onTap: () => _gir(context),
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       decoration: BoxDecoration(gradient: kGrad, borderRadius: BorderRadius.circular(16)),
-                      child: const Center(child: Text('Giriş yap',
+                      child: const Center(child: Text('E-posta ile giriş yap',
                           style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900))),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AnaKabuk())),
+                    child: const Text('Demo olarak gez →', style: TextStyle(fontSize: 14, color: kMuted2, fontWeight: FontWeight.w700)),
+                  ),
+                  const SizedBox(height: 14),
                   const Text('Buluvo · Native Android (Flutter)', style: TextStyle(fontSize: 12, color: kMuted)),
                 ],
               ),
@@ -199,7 +291,68 @@ class GirisEkrani extends StatelessWidget {
   }
 
   void _gir(BuildContext context) {
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AnaKabuk()));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WebGiris()));
+  }
+}
+
+// ============================================================
+// WEBVIEW GİRİŞ — mevcut gerçek giriş sayfası, token yakalar
+// ============================================================
+class WebGiris extends StatefulWidget {
+  const WebGiris({super.key});
+  @override
+  State<WebGiris> createState() => _WebGirisState();
+}
+
+class _WebGirisState extends State<WebGiris> {
+  late final WebViewController _c;
+  bool _bitti = false;
+  bool _yukleniyor = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageFinished: (_) { if (mounted) setState(() => _yukleniyor = false); },
+        onNavigationRequest: (req) {
+          if (req.url.startsWith("buluvo://")) {
+            final uri = Uri.tryParse(req.url);
+            final tok = uri?.queryParameters["token"];
+            if (tok != null && tok.isNotEmpty && !_bitti) {
+              _bitti = true;
+              _tamamla(tok);
+            }
+            return NavigationDecision.prevent;
+          }
+          return NavigationDecision.navigate;
+        },
+      ))
+      ..loadRequest(Uri.parse("${Api.kBase}/_api/token-al"));
+  }
+
+  Future<void> _tamamla(String tok) async {
+    await Api.tokenKaydet(tok);
+    await Api.ozetYukle();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AnaKabuk()), (r) => false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: kPanel, elevation: 0, foregroundColor: kText,
+        title: const Text('Giriş', style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
+      body: SafeArea(
+        child: Stack(children: [
+          WebViewWidget(controller: _c),
+          if (_yukleniyor) const Center(child: CircularProgressIndicator(color: kMor)),
+        ]),
+      ),
+    );
   }
 }
 
@@ -215,6 +368,12 @@ class AnaKabuk extends StatefulWidget {
 class _AnaKabukState extends State<AnaKabuk> {
   int _i = 0;
   final _sayfalar = const [KesfetSayfasi(), BegenenlerSayfasi(), SohbetSayfasi(), ProfilSayfasi()];
+
+  @override
+  void initState() {
+    super.initState();
+    Api.ozetYukle(); // gerçek veri varsa tazele
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -260,7 +419,7 @@ class _AnaKabukState extends State<AnaKabuk> {
 }
 
 // ============================================================
-// KEŞFET (gerçek kart destesi + kaydırma)
+// KEŞFET (kart destesi + kaydırma)
 // ============================================================
 class KesfetSayfasi extends StatefulWidget {
   const KesfetSayfasi({super.key});
@@ -272,10 +431,7 @@ class _KesfetSayfasiState extends State<KesfetSayfasi> {
   int _idx = 0;
 
   void _sonraki(bool begendi, Kisi k) {
-    if (begendi) {
-      // %50 ihtimalle eşleşme animasyonu (demo)
-      if (_idx.isEven) _eslesme(k);
-    }
+    if (begendi && _idx.isEven) _eslesme(k);
     setState(() => _idx = (_idx + 1) % durum.deste.length);
   }
 
@@ -404,7 +560,6 @@ class BegenenlerSayfasi extends StatelessWidget {
       [const Color(0xFFFCD34D), const Color(0xFFF59E0B)],
     ];
     final adlar = ['Elif, 24', 'Deniz, 27', 'Selin, 25', 'Zeynep, 23'];
-    final harfler = ['E', 'D', 'S', 'Z'];
     return Column(
       children: [
         const _BaslikBar(baslik: 'Beğenenler'),
@@ -420,7 +575,10 @@ class BegenenlerSayfasi extends StatelessWidget {
                     decoration: BoxDecoration(gradient: kGrad, borderRadius: BorderRadius.circular(20),
                         boxShadow: [BoxShadow(color: kPembe.withOpacity(.4), blurRadius: 24, offset: const Offset(0, 12))]),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Seni ${durum.begenenSayisi} kişi beğendi ❤', style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+                      ValueListenableBuilder<int>(
+                        valueListenable: durum.begenenSayisi,
+                        builder: (_, say, __) => Text('Seni $say kişi beğendi ❤', style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+                      ),
                       const SizedBox(height: 6),
                       const Text('Hepsini net görmek için aç.', style: TextStyle(color: Colors.white, fontSize: 13)),
                       const SizedBox(height: 14),
@@ -628,11 +786,20 @@ class ProfilSayfasi extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           children: [
             Center(child: Column(children: [
-              Container(width: 96, height: 96, decoration: const BoxDecoration(gradient: kGrad, shape: BoxShape.circle),
-                  child: const Center(child: Text('E', style: TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w900)))),
+              ValueListenableBuilder<String>(
+                valueListenable: durum.harf,
+                builder: (_, h, __) => Container(width: 96, height: 96, decoration: const BoxDecoration(gradient: kGrad, shape: BoxShape.circle),
+                    child: Center(child: Text(h, style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w900)))),
+              ),
               const SizedBox(height: 12),
-              const Text('Eray, 28', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: kText)),
-              const Text('İstanbul', style: TextStyle(color: kMuted, fontSize: 14)),
+              ValueListenableBuilder<String>(
+                valueListenable: durum.ad,
+                builder: (_, a, __) => Text(a, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: kText)),
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: durum.gercek,
+                builder: (_, g, __) => Text(g ? 'Gerçek hesabına bağlı' : 'Demo mod', style: const TextStyle(color: kMuted, fontSize: 13)),
+              ),
               const SizedBox(height: 14),
               ValueListenableBuilder<int>(
                 valueListenable: durum.jeton,
@@ -671,8 +838,11 @@ class ProfilSayfasi extends StatelessWidget {
   );
 
   Widget _menuCikis(BuildContext context) => GestureDetector(
-    onTap: () => Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const GirisEkrani()), (r) => false),
+    onTap: () async {
+      await Api.cikis();
+      if (!context.mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const GirisEkrani()), (r) => false);
+    },
     child: Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(16),
@@ -1044,24 +1214,6 @@ class _BeyazButon extends StatelessWidget {
         icon, const SizedBox(width: 12),
         Text(text, style: const TextStyle(color: Color(0xFF1F1F1F), fontSize: 15, fontWeight: FontWeight.w700)),
       ]),
-    ),
-  );
-}
-
-class _Alan extends StatelessWidget {
-  final String hint;
-  final bool obscure;
-  const _Alan({required this.hint, this.obscure = false});
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(16), border: Border.all(color: kBorder)),
-    child: TextField(
-      obscureText: obscure,
-      style: const TextStyle(color: kText, fontSize: 16),
-      decoration: InputDecoration(
-        hintText: hint, hintStyle: const TextStyle(color: kMuted2),
-        border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-      ),
     ),
   );
 }
