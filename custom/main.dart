@@ -98,6 +98,35 @@ class Api {
     } catch (e) { return null; }
   }
 
+  /// /_api/begenenler -> {acik, sayi, jeton, liste:[{ad,foto}]} veya null
+  static Future<Map?> begenenlerYukle() async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return null;
+      final r = await http
+          .get(Uri.parse("$kBase/_api/begenenler"), headers: {"Authorization": "Bearer $t", "accept": "application/json"})
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(r.body);
+      if (j is Map && j["ok"] == true) return j;
+      return null;
+    } catch (e) { return null; }
+  }
+
+  /// /_api/begenenler-ac -> {ok, acik, jeton} / {ok:false, hata:'yetersiz'} veya null
+  static Future<Map?> begenenlerAc() async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return null;
+      final r = await http
+          .post(Uri.parse("$kBase/_api/begenenler-ac"), headers: {"Authorization": "Bearer $t", "accept": "application/json"})
+          .timeout(const Duration(seconds: 12));
+      final j = jsonDecode(r.body);
+      if (j is Map) return j;
+      return null;
+    } catch (e) { return null; }
+  }
+
   static Future<void> cikis() async {
     try {
       final t = await token();
@@ -585,92 +614,148 @@ class _KesfetSayfasiState extends State<KesfetSayfasi> {
 // ============================================================
 // BEĞENENLER (buğulu kilit — jetonla açılır)
 // ============================================================
-class BegenenlerSayfasi extends StatelessWidget {
+class BegenenlerSayfasi extends StatefulWidget {
   const BegenenlerSayfasi({super.key});
+  @override
+  State<BegenenlerSayfasi> createState() => _BegenenlerSayfasiState();
+}
 
-  void _ac(BuildContext context) {
-    if (durum.jeton.value < 100) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Yetersiz jeton — Jeton al sayfasından yükle'), backgroundColor: kMor));
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const JetonSayfasi()));
+class _BegenenlerSayfasiState extends State<BegenenlerSayfasi> {
+  static const _renkler = [
+    [Color(0xFFF0ABFC), Color(0xFFA855F7)],
+    [Color(0xFFFDA4AF), Color(0xFFFB7185)],
+    [Color(0xFF6EE7B7), Color(0xFF10B981)],
+    [Color(0xFFFCD34D), Color(0xFFF59E0B)],
+  ];
+  bool _yuklendi = false;
+  bool _acik = false;
+  int _sayi = 0;
+  List<Map> _liste = [];
+  bool _aciliyor = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _acik = durum.begenenlerAcik.value;
+    _sayi = durum.begenenSayisi.value;
+    _tazele();
+  }
+
+  Future<void> _tazele() async {
+    final j = await Api.begenenlerYukle();
+    if (j == null || !mounted) return;
+    setState(() {
+      _yuklendi = true;
+      _acik = j["acik"] == true;
+      if (j["sayi"] != null) _sayi = (j["sayi"] as num).toInt();
+      _liste = (j["liste"] is List) ? List<Map>.from((j["liste"] as List).whereType<Map>()) : [];
+    });
+    if (j["jeton"] != null) durum.jeton.value = (j["jeton"] as num).toInt();
+    durum.begenenSayisi.value = _sayi;
+    durum.begenenlerAcik.value = _acik;
+  }
+
+  Future<void> _ac() async {
+    if (_aciliyor) return;
+    setState(() => _aciliyor = true);
+    final j = await Api.begenenlerAc();
+    if (!mounted) return;
+    setState(() => _aciliyor = false);
+    if (j == null) {
+      // backend yoksa yerel demo davranışı
+      if (durum.jeton.value < 100) { _jetonYonlendir(); return; }
+      durum.jeton.value -= 100;
+      setState(() => _acik = true);
+      durum.begenenlerAcik.value = true;
       return;
     }
-    durum.jeton.value -= 100;
-    durum.begenenlerAcik.value = true;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Beğenenler açıldı 🎉'), backgroundColor: kMor));
+    if (j["ok"] == true && j["acik"] == true) {
+      if (j["jeton"] != null) durum.jeton.value = (j["jeton"] as num).toInt();
+      durum.begenenlerAcik.value = true;
+      await _tazele();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Beğenenler açıldı 🎉'), backgroundColor: kMor));
+      return;
+    }
+    if (j["hata"] == "yetersiz") { _jetonYonlendir(); return; }
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Açılamadı, tekrar dene'), backgroundColor: kMor));
+  }
+
+  void _jetonYonlendir() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Yetersiz jeton — Jeton al sayfasından yükle'), backgroundColor: kMor));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const JetonSayfasi()));
   }
 
   @override
   Widget build(BuildContext context) {
-    final renkler = [
-      [const Color(0xFFF0ABFC), const Color(0xFFA855F7)],
-      [const Color(0xFFFDA4AF), const Color(0xFFFB7185)],
-      [const Color(0xFF6EE7B7), const Color(0xFF10B981)],
-      [const Color(0xFFFCD34D), const Color(0xFFF59E0B)],
-    ];
-    final adlar = ['Elif, 24', 'Deniz, 27', 'Selin, 25', 'Zeynep, 23'];
+    // Izgara için öğe sayısı: açık+gerçek liste varsa onun kadar, yoksa 4 (demo/buğulu)
+    final int adet = (_acik && _yuklendi) ? (_liste.isEmpty ? 0 : _liste.length) : 4;
     return Column(
       children: [
         const _BaslikBar(baslik: 'Beğenenler'),
         Expanded(
-          child: ValueListenableBuilder<bool>(
-            valueListenable: durum.begenenlerAcik,
-            builder: (context, acik, _) => ListView(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              children: [
-                if (!acik)
-                  Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(gradient: kGrad, borderRadius: BorderRadius.circular(20),
-                        boxShadow: [BoxShadow(color: kPembe.withOpacity(.4), blurRadius: 24, offset: const Offset(0, 12))]),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      ValueListenableBuilder<int>(
-                        valueListenable: durum.begenenSayisi,
-                        builder: (_, say, __) => Text('Seni $say kişi beğendi ❤', style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            children: [
+              if (!_acik)
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(gradient: kGrad, borderRadius: BorderRadius.circular(20),
+                      boxShadow: [BoxShadow(color: kPembe.withOpacity(.4), blurRadius: 24, offset: const Offset(0, 12))]),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Seni $_sayi kişi beğendi ❤', style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 6),
+                    const Text('Hepsini net görmek için aç.', style: TextStyle(color: Colors.white, fontSize: 13)),
+                    const SizedBox(height: 14),
+                    GestureDetector(
+                      onTap: _aciliyor ? null : _ac,
+                      child: Container(
+                        width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 15),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(13)),
+                        child: Center(child: Text(_aciliyor ? 'Açılıyor…' : '🔒 100 jeton ile hepsini aç',
+                            style: const TextStyle(color: Color(0xFFA21CAF), fontWeight: FontWeight.w900, fontSize: 15))),
                       ),
-                      const SizedBox(height: 6),
-                      const Text('Hepsini net görmek için aç.', style: TextStyle(color: Colors.white, fontSize: 13)),
-                      const SizedBox(height: 14),
-                      GestureDetector(
-                        onTap: () => _ac(context),
-                        child: Container(
-                          width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 15),
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(13)),
-                          child: const Center(child: Text('🔒 100 jeton ile hepsini aç',
-                              style: TextStyle(color: Color(0xFFA21CAF), fontWeight: FontWeight.w900, fontSize: 15))),
-                        ),
-                      ),
-                    ]),
-                  ),
-                if (acik)
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(18), border: Border.all(color: kBorder)),
-                    child: Row(children: const [
-                      Icon(Icons.lock_open, color: kMor),
-                      SizedBox(width: 10),
-                      Expanded(child: Text('Kilit açık — seni beğenenleri görüyorsun', style: TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 14))),
-                    ]),
-                  ),
-                const SizedBox(height: 16),
+                    ),
+                  ]),
+                ),
+              if (_acik)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(18), border: Border.all(color: kBorder)),
+                  child: Row(children: const [
+                    Icon(Icons.lock_open, color: kMor),
+                    SizedBox(width: 10),
+                    Expanded(child: Text('Kilit açık — seni beğenenleri görüyorsun', style: TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 14))),
+                  ]),
+                ),
+              const SizedBox(height: 16),
+              if (_acik && _yuklendi && _liste.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 40),
+                  child: Center(child: Text('Henüz seni beğenen olmadı.', style: TextStyle(color: kMuted, fontSize: 15))),
+                )
+              else
                 GridView.count(
                   crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
                   mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: .75,
                   children: [
-                    for (int i = 0; i < renkler.length; i++)
+                    for (int i = 0; i < adet; i++)
                       ClipRRect(
                         borderRadius: BorderRadius.circular(22),
                         child: Stack(fit: StackFit.expand, children: [
                           Container(decoration: BoxDecoration(gradient: LinearGradient(
-                              begin: Alignment.topLeft, end: Alignment.bottomRight, colors: renkler[i]))),
-                          if (acik)
+                              begin: Alignment.topLeft, end: Alignment.bottomRight, colors: _renkler[i % _renkler.length]))),
+                          if (_acik && _yuklendi && _liste[i]["foto"] != null)
+                            Image.network("${Api.kBase}${_liste[i]["foto"]}", fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                loadingBuilder: (c, w, p) => p == null ? w : const SizedBox.shrink()),
+                          if (_acik && _yuklendi)
                             Container(
                               alignment: Alignment.bottomLeft,
                               padding: const EdgeInsets.all(12),
                               decoration: const BoxDecoration(gradient: LinearGradient(
                                   begin: Alignment.center, end: Alignment.bottomCenter, colors: [Colors.transparent, Color(0x99000000)])),
-                              child: Text(adlar[i], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                              child: Text((_liste[i]["ad"] ?? "").toString(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
                             )
                           else
                             Container(color: kMor.withOpacity(.14), child: const Column(
@@ -685,8 +770,7 @@ class BegenenlerSayfasi extends StatelessWidget {
                       ),
                   ],
                 ),
-              ],
-            ),
+            ],
           ),
         ),
       ],
