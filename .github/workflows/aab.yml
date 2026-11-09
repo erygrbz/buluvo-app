@@ -1,0 +1,116 @@
+name: Buluvo AAB (imzalı - Play)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v4
+
+      - name: Java 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter kur
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+
+      - name: Proje iskeleti
+        run: flutter create --org com.buluvo --project-name buluvo --platforms=android .
+
+      - name: Paketleri ekle
+        run: flutter pub add webview_flutter shared_preferences http
+
+      - name: İnternet izni (ŞART)
+        run: |
+          sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
+
+      - name: Paket adını com.buluvo.app yap (mevcut Play listesiyle aynı)
+        run: |
+          python3 - <<'PY'
+          import glob
+          for f in glob.glob('android/app/build.gradle.kts') + glob.glob('android/app/build.gradle'):
+              s = open(f).read()
+              s = s.replace('com.buluvo.buluvo', 'com.buluvo.app')
+              open(f, 'w').write(s)
+              print('paket güncellendi:', f)
+          PY
+
+      - name: İmza anahtarını hazırla (GitHub Secrets'tan)
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/upload.keystore
+          cat > android/key.properties <<EOF
+          storePassword=${{ secrets.STORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=upload.keystore
+          EOF
+          echo "keystore boyutu:"; wc -c < android/app/upload.keystore
+
+      - name: build.gradle imza yapılandır
+        run: |
+          python3 - <<'PY'
+          import glob, sys
+          kts = glob.glob('android/app/build.gradle.kts')
+          groovy = glob.glob('android/app/build.gradle')
+          if kts:
+              f = kts[0]; s = open(f).read()
+              top = ('import java.util.Properties\n'
+                     'import java.io.FileInputStream\n'
+                     'val keystoreProperties = Properties()\n'
+                     'val keystorePropertiesFile = rootProject.file("key.properties")\n'
+                     'if (keystorePropertiesFile.exists()) { FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) } }\n\n')
+              s = top + s
+              sign = ('android {\n'
+                      '    signingConfigs {\n'
+                      '        create("release") {\n'
+                      '            keyAlias = keystoreProperties["keyAlias"] as String\n'
+                      '            keyPassword = keystoreProperties["keyPassword"] as String\n'
+                      '            storeFile = file(keystoreProperties["storeFile"] as String)\n'
+                      '            storePassword = keystoreProperties["storePassword"] as String\n'
+                      '        }\n'
+                      '    }')
+              s = s.replace('android {', sign, 1)
+              s = s.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
+              open(f, 'w').write(s); print('KTS imza eklendi')
+          elif groovy:
+              f = groovy[0]; s = open(f).read()
+              top = ('def keystoreProperties = new Properties()\n'
+                     'def keystorePropertiesFile = rootProject.file("key.properties")\n'
+                     'if (keystorePropertiesFile.exists()) { keystorePropertiesFile.withInputStream { keystoreProperties.load(it) } }\n\n')
+              s = top + s
+              sign = ('android {\n'
+                      '    signingConfigs {\n'
+                      '        release {\n'
+                      '            keyAlias keystoreProperties["keyAlias"]\n'
+                      '            keyPassword keystoreProperties["keyPassword"]\n'
+                      '            storeFile file(keystoreProperties["storeFile"])\n'
+                      '            storePassword keystoreProperties["storePassword"]\n'
+                      '        }\n'
+                      '    }')
+              s = s.replace('android {', sign, 1)
+              s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
+              open(f, 'w').write(s); print('Groovy imza eklendi')
+          else:
+              print('build.gradle bulunamadı'); sys.exit(1)
+          PY
+
+      - name: Kendi ekranımız
+        run: cp custom/main.dart lib/main.dart
+
+      - name: AAB derle (imzalı release)
+        run: flutter build appbundle --release --build-number=1000 --build-name=2.0.0
+
+      - name: AAB'yi yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: buluvo-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
