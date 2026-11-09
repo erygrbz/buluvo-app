@@ -195,6 +195,36 @@ class Api {
     } catch (e) { return null; }
   }
 
+  /// /_api/profil -> {ad,yas,sehir,bio,gender,foto,jeton,premium} veya null
+  static Future<Map?> profilYukle() async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return null;
+      final r = await http
+          .get(Uri.parse("$kBase/_api/profil"), headers: {"Authorization": "Bearer $t", "accept": "application/json"})
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(r.body);
+      if (j is Map && j["ok"] == true) return j;
+      return null;
+    } catch (e) { return null; }
+  }
+
+  /// /_api/profil-guncelle -> true/false
+  static Future<bool> profilGuncelle({String? ad, String? bio, String? sehir}) async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return false;
+      final r = await http
+          .post(Uri.parse("$kBase/_api/profil-guncelle"),
+              headers: {"Authorization": "Bearer $t", "content-type": "application/json"},
+              body: jsonEncode({if (ad != null) "ad": ad, if (bio != null) "bio": bio, if (sehir != null) "sehir": sehir}))
+          .timeout(const Duration(seconds: 12));
+      final j = jsonDecode(r.body);
+      return j is Map && j["ok"] == true;
+    } catch (e) { return false; }
+  }
+
   /// /_api/mesaj-gonder -> true/false
   static Future<bool> mesajGonder(String mid, String metin) async {
     try {
@@ -1065,10 +1095,32 @@ class _SohbetDetayState extends State<SohbetDetay> {
 // ============================================================
 // PROFİL
 // ============================================================
-class ProfilSayfasi extends StatelessWidget {
+class ProfilSayfasi extends StatefulWidget {
   const ProfilSayfasi({super.key});
   @override
+  State<ProfilSayfasi> createState() => _ProfilSayfasiState();
+}
+
+class _ProfilSayfasiState extends State<ProfilSayfasi> {
+  Map? _p;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.profilYukle().then((j) { if (j != null && mounted) setState(() => _p = j); });
+  }
+
+  Widget _harfAvatar() => ValueListenableBuilder<String>(
+    valueListenable: durum.harf,
+    builder: (_, h, __) => Container(width: 96, height: 96, decoration: const BoxDecoration(gradient: kGrad, shape: BoxShape.circle),
+        child: Center(child: Text(h, style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w900)))),
+  );
+
+  @override
   Widget build(BuildContext context) {
+    final foto = _p?["foto"] == null ? null : "${Api.kBase}${_p!["foto"]}";
+    final yas = (_p?["yas"] is num) ? (_p!["yas"] as num).toInt() : 0;
+    final sehir = (_p?["sehir"] ?? "").toString();
     return Column(
       children: [
         const _BaslikBar(baslik: 'Profilim'),
@@ -1076,19 +1128,20 @@ class ProfilSayfasi extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           children: [
             Center(child: Column(children: [
-              ValueListenableBuilder<String>(
-                valueListenable: durum.harf,
-                builder: (_, h, __) => Container(width: 96, height: 96, decoration: const BoxDecoration(gradient: kGrad, shape: BoxShape.circle),
-                    child: Center(child: Text(h, style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w900)))),
-              ),
+              foto != null
+                  ? ClipOval(child: SizedBox(width: 96, height: 96,
+                      child: Image.network(foto, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _harfAvatar())))
+                  : _harfAvatar(),
               const SizedBox(height: 12),
               ValueListenableBuilder<String>(
                 valueListenable: durum.ad,
-                builder: (_, a, __) => Text(a, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: kText)),
+                builder: (_, a, __) => Text(yas > 0 ? '$a, $yas' : a, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: kText)),
               ),
+              if (sehir.isNotEmpty) Text(sehir, style: const TextStyle(color: kMuted, fontSize: 14)),
+              const SizedBox(height: 4),
               ValueListenableBuilder<bool>(
                 valueListenable: durum.gercek,
-                builder: (_, g, __) => Text(g ? 'Gerçek hesabına bağlı' : 'Demo mod', style: const TextStyle(color: kMuted, fontSize: 13)),
+                builder: (_, g, __) => Text(g ? 'Gerçek hesabına bağlı' : 'Demo mod', style: const TextStyle(color: kMuted2, fontSize: 12)),
               ),
               const SizedBox(height: 14),
               ValueListenableBuilder<int>(
@@ -1233,19 +1286,75 @@ class BakanlarSayfasi extends StatelessWidget {
       'Son 7 günde profiline 34 kişi baktı.\nTamamını görmek için premium gerekli.');
 }
 
-class DuzenleSayfasi extends StatelessWidget {
+class DuzenleSayfasi extends StatefulWidget {
   const DuzenleSayfasi({super.key});
+  @override
+  State<DuzenleSayfasi> createState() => _DuzenleSayfasiState();
+}
+
+class _DuzenleSayfasiState extends State<DuzenleSayfasi> {
+  final _ad = TextEditingController();
+  final _sehir = TextEditingController();
+  final _bio = TextEditingController();
+  bool _yuklendi = false;
+  bool _kaydediyor = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.profilYukle().then((j) {
+      if (j != null && mounted) {
+        setState(() {
+          _ad.text = (j["ad"] ?? "").toString();
+          _sehir.text = (j["sehir"] ?? "").toString();
+          _bio.text = (j["bio"] ?? "").toString();
+          _yuklendi = true;
+        });
+      } else if (mounted) {
+        setState(() => _yuklendi = true);
+      }
+    });
+  }
+
+  Future<void> _kaydet() async {
+    if (_kaydediyor) return;
+    setState(() => _kaydediyor = true);
+    final ok = await Api.profilGuncelle(ad: _ad.text.trim(), bio: _bio.text.trim(), sehir: _sehir.text.trim());
+    if (ok) { durum.ad.value = _ad.text.trim().isEmpty ? durum.ad.value : _ad.text.trim(); }
+    if (!mounted) return;
+    setState(() => _kaydediyor = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok ? 'Profil kaydedildi ✅' : 'Kaydedilemedi, tekrar dene'), backgroundColor: kMor));
+    if (ok) Navigator.of(context).pop();
+  }
+
+  @override
+  void dispose() { _ad.dispose(); _sehir.dispose(); _bio.dispose(); super.dispose(); }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(backgroundColor: kPanel, elevation: 0, foregroundColor: kText,
           title: const Text('Profili düzenle', style: TextStyle(fontWeight: FontWeight.w800))),
-      body: SafeArea(child: ListView(padding: const EdgeInsets.all(16), children: const [
-        _DuzenleAlan(etiket: 'Ad', deger: 'Eray'),
-        _DuzenleAlan(etiket: 'Yaş', deger: '28'),
-        _DuzenleAlan(etiket: 'Şehir', deger: 'İstanbul'),
-        _DuzenleAlan(etiket: 'Hakkımda', deger: 'Kahve, müzik ve iyi sohbet.'),
-      ])),
+      body: SafeArea(
+        child: !_yuklendi
+            ? const Center(child: CircularProgressIndicator(color: kMor))
+            : ListView(padding: const EdgeInsets.all(16), children: [
+                _DuzenleAlan(etiket: 'Ad', kontrol: _ad),
+                _DuzenleAlan(etiket: 'Şehir', kontrol: _sehir),
+                _DuzenleAlan(etiket: 'Hakkımda', kontrol: _bio),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: _kaydediyor ? null : _kaydet,
+                  child: Container(
+                    width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(gradient: kGrad, borderRadius: BorderRadius.circular(16)),
+                    child: Center(child: Text(_kaydediyor ? 'Kaydediliyor…' : 'Kaydet',
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900))),
+                  ),
+                ),
+              ]),
+      ),
     );
   }
 }
@@ -1302,8 +1411,9 @@ Widget _basitSayfa(String baslik, IconData ikon, String metin) {
 }
 
 class _DuzenleAlan extends StatelessWidget {
-  final String etiket, deger;
-  const _DuzenleAlan({required this.etiket, required this.deger});
+  final String etiket;
+  final TextEditingController kontrol;
+  const _DuzenleAlan({required this.etiket, required this.kontrol});
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: 14),
@@ -1313,7 +1423,8 @@ class _DuzenleAlan extends StatelessWidget {
       Container(
         decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kBorder)),
         child: TextField(
-          controller: TextEditingController(text: deger),
+          controller: kontrol,
+          maxLines: etiket == 'Hakkımda' ? 3 : 1,
           style: const TextStyle(color: kText, fontSize: 15),
           decoration: const InputDecoration(border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 15)),
         ),
