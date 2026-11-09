@@ -89,7 +89,7 @@ class Api {
           final ad = (e["ad"] ?? "").toString();
           final sehir = (e["sehir"] ?? "").toString();
           final foto = e["foto"] == null ? null : "$kBase${e["foto"]}";
-          out.add(Kisi(ad, 0, sehir, '', 0, false, const [], gradlar[i % gradlar.length], foto: foto));
+          out.add(Kisi(ad, 0, sehir, '', 0, false, const [], gradlar[i % gradlar.length], foto: foto, uid: e["id"]?.toString()));
           i++;
         }
         return out.isEmpty ? null : out;
@@ -179,6 +179,22 @@ class Api {
     } catch (e) { return null; }
   }
 
+  /// /_api/swipe -> {ok, eslesme} veya null
+  static Future<Map?> swipe(String target, String action) async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return null;
+      final r = await http
+          .post(Uri.parse("$kBase/_api/swipe"),
+              headers: {"Authorization": "Bearer $t", "content-type": "application/json"},
+              body: jsonEncode({"target": target, "action": action}))
+          .timeout(const Duration(seconds: 12));
+      final j = jsonDecode(r.body);
+      if (j is Map) return j;
+      return null;
+    } catch (e) { return null; }
+  }
+
   /// /_api/mesaj-gonder -> true/false
   static Future<bool> mesajGonder(String mid, String metin) async {
     try {
@@ -220,7 +236,8 @@ class Kisi {
   final List<String> ilgi;
   final List<Color> renk;
   final String? foto;
-  const Kisi(this.ad, this.yas, this.sehir, this.mesafe, this.uyum, this.cevrimici, this.ilgi, this.renk, {this.foto});
+  final String? uid;
+  const Kisi(this.ad, this.yas, this.sehir, this.mesafe, this.uyum, this.cevrimici, this.ilgi, this.renk, {this.foto, this.uid});
 }
 
 class Mesaj {
@@ -573,7 +590,15 @@ class _KesfetSayfasiState extends State<KesfetSayfasi> {
   }
 
   void _sonraki(bool begendi, Kisi k) {
-    if (begendi && _idx.isEven) _eslesme(k);
+    final hedef = k.uid;
+    if (hedef != null) {
+      // gerçek üye: sunucuya kaydet; sadece gerçek karşılıklı beğenide eşleşme göster
+      Api.swipe(hedef, begendi ? 'like' : 'pass').then((j) {
+        if (j != null && j["eslesme"] == true && mounted) _eslesme(k);
+      });
+    } else if (begendi && _idx.isEven) {
+      _eslesme(k); // demo davranışı
+    }
     setState(() => _idx = (_idx + 1) % _liste.length);
   }
 
