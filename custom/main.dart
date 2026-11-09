@@ -64,6 +64,40 @@ class Api {
     } catch (e) { return false; }
   }
 
+  /// /_api/kesfet -> gerçek üye listesi. Boş/başarısızsa null (demo'ya düşülür).
+  static Future<List<Kisi>?> kesfetYukle() async {
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return null;
+      final r = await http
+          .get(Uri.parse("$kBase/_api/kesfet"), headers: {"Authorization": "Bearer $t", "accept": "application/json"})
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(r.body);
+      if (j is Map && j["ok"] == true && j["liste"] is List) {
+        final gradlar = [
+          [const Color(0xFFF0ABFC), const Color(0xFFA855F7)],
+          [const Color(0xFFFDA4AF), const Color(0xFFFB7185)],
+          [const Color(0xFF6EE7B7), const Color(0xFF10B981)],
+          [const Color(0xFFFCD34D), const Color(0xFFF59E0B)],
+          [const Color(0xFF93C5FD), const Color(0xFF6366F1)],
+        ];
+        final List<Kisi> out = [];
+        int i = 0;
+        for (final e in (j["liste"] as List)) {
+          if (e is! Map) continue;
+          final ad = (e["ad"] ?? "").toString();
+          final sehir = (e["sehir"] ?? "").toString();
+          final foto = e["foto"] == null ? null : "$kBase${e["foto"]}";
+          out.add(Kisi(ad, 0, sehir, '', 0, false, const [], gradlar[i % gradlar.length], foto: foto));
+          i++;
+        }
+        return out.isEmpty ? null : out;
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+
   static Future<void> cikis() async {
     try {
       final t = await token();
@@ -89,7 +123,8 @@ class Kisi {
   final bool cevrimici;
   final List<String> ilgi;
   final List<Color> renk;
-  const Kisi(this.ad, this.yas, this.sehir, this.mesafe, this.uyum, this.cevrimici, this.ilgi, this.renk);
+  final String? foto;
+  const Kisi(this.ad, this.yas, this.sehir, this.mesafe, this.uyum, this.cevrimici, this.ilgi, this.renk, {this.foto});
 }
 
 class Mesaj {
@@ -429,10 +464,19 @@ class KesfetSayfasi extends StatefulWidget {
 
 class _KesfetSayfasiState extends State<KesfetSayfasi> {
   int _idx = 0;
+  List<Kisi> _liste = durum.deste;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.kesfetYukle().then((g) {
+      if (g != null && g.isNotEmpty && mounted) setState(() { _liste = g; _idx = 0; });
+    });
+  }
 
   void _sonraki(bool begendi, Kisi k) {
     if (begendi && _idx.isEven) _eslesme(k);
-    setState(() => _idx = (_idx + 1) % durum.deste.length);
+    setState(() => _idx = (_idx + 1) % _liste.length);
   }
 
   void _eslesme(Kisi k) {
@@ -466,7 +510,7 @@ class _KesfetSayfasiState extends State<KesfetSayfasi> {
 
   @override
   Widget build(BuildContext context) {
-    final k = durum.deste[_idx];
+    final k = _liste[_idx];
     return Column(
       children: [
         _BaslikBar(baslik: 'Buluvo', jetonGoster: true),
@@ -488,10 +532,14 @@ class _KesfetSayfasiState extends State<KesfetSayfasi> {
               child: Stack(fit: StackFit.expand, children: [
                 Container(decoration: BoxDecoration(gradient: LinearGradient(
                     begin: Alignment.topLeft, end: Alignment.bottomRight, colors: k.renk))),
+                if (k.foto != null)
+                  Image.network(k.foto!, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      loadingBuilder: (c, w, p) => p == null ? w : const SizedBox.shrink()),
                 Positioned(left: 12, right: 12, top: 12, child: Row(children: [
-                  for (int i = 0; i < durum.deste.length; i++) ...[
+                  for (int i = 0; i < _liste.length && i < 8; i++) ...[
                     _Nokta(aktif: i == _idx),
-                    if (i < durum.deste.length - 1) const SizedBox(width: 6),
+                    if (i < _liste.length - 1 && i < 7) const SizedBox(width: 6),
                   ],
                 ])),
                 Container(decoration: const BoxDecoration(gradient: LinearGradient(
@@ -499,18 +547,20 @@ class _KesfetSayfasiState extends State<KesfetSayfasi> {
                 Positioned(left: 20, right: 20, bottom: 24, child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(children: [
-                      if (k.cevrimici)
-                        const _Rozet(cocuk: Text('● Çevrimiçi', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))),
-                      if (k.cevrimici) const SizedBox(width: 8),
-                      _Rozet(cocuk: Text('%${k.uyum} uyum', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))),
-                    ]),
-                    const SizedBox(height: 10),
-                    Text('${k.ad}, ${k.yas}', style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w900)),
+                    if (k.cevrimici || k.uyum > 0)
+                      Row(children: [
+                        if (k.cevrimici)
+                          const _Rozet(cocuk: Text('● Çevrimiçi', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))),
+                        if (k.cevrimici && k.uyum > 0) const SizedBox(width: 8),
+                        if (k.uyum > 0)
+                          _Rozet(cocuk: Text('%${k.uyum} uyum', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))),
+                      ]),
+                    if (k.cevrimici || k.uyum > 0) const SizedBox(height: 10),
+                    Text(k.yas > 0 ? '${k.ad}, ${k.yas}' : k.ad, style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w900)),
                     const SizedBox(height: 4),
-                    Text('${k.sehir} · ${k.mesafe}', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 12),
-                    Wrap(spacing: 8, runSpacing: 8, children: [for (final i in k.ilgi) _Cip(t: i)]),
+                    Text(k.mesafe.isNotEmpty ? '${k.sehir} · ${k.mesafe}' : k.sehir, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                    if (k.ilgi.isNotEmpty) const SizedBox(height: 12),
+                    if (k.ilgi.isNotEmpty) Wrap(spacing: 8, runSpacing: 8, children: [for (final i in k.ilgi) _Cip(t: i)]),
                   ],
                 )),
               ]),
