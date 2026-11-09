@@ -31,6 +31,15 @@ jobs:
       - name: Flutter proje iskeletini oluştur (android klasörü vb.)
         run: flutter create --org com.buluvo --project-name buluvo --platforms=android .
 
+      - name: Gerekli paketleri ekle (gerçek veri + giriş için)
+        run: flutter pub add webview_flutter shared_preferences http
+
+      - name: İnternet iznini ekle (release APK için ŞART)
+        run: |
+          sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
+          echo "--- AndroidManifest.xml (izin kontrolü) ---"
+          grep -n "INTERNET" android/app/src/main/AndroidManifest.xml || echo "UYARI: izin eklenemedi"
+
       - name: Kendi ekranımızı yerleştir
         run: cp custom/main.dart lib/main.dart
 
