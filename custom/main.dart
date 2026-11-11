@@ -20,6 +20,26 @@ const kMor = Color(0xFF9333EA);
 const kPembe = Color(0xFFEC4899);
 const kGrad = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [kMor, kPembe]);
 
+// Metin kısayollarını emojiye çevirir ( :) -> 🙂 )
+String emojile(String s) {
+  const harita = {
+    ':-)': '🙂', ':)': '🙂', '(:': '🙂',
+    ':-D': '😄', ':D': '😄',
+    ':-(': '🙁', ':(': '🙁',
+    ';-)': '😉', ';)': '😉',
+    ':-P': '😛', ':P': '😛', ':p': '😛',
+    ':-O': '😮', ':O': '😮', ':o': '😮',
+    ':-*': '😘', ':*': '😘',
+    "</3": '💔', '<3': '❤️',
+    ':|': '😐', ":'(": '😢',
+    'xD': '😆', 'XD': '😆',
+    'B)': '😎', ':3': '😊', 'o/': '👋',
+  };
+  var out = s;
+  harita.forEach((k, v) => out = out.replaceAll(k, v));
+  return out;
+}
+
 // ============================================================
 // SUNUCU / API
 //   Gerçek giriş: /_api/token-al (mevcut giriş sayfası, Google+şifre)
@@ -1021,7 +1041,7 @@ class _SohbetDetayState extends State<SohbetDetay> {
   }
 
   void _gonder() {
-    final t = _kontrol.text.trim();
+    final t = emojile(_kontrol.text.trim());
     if (t.isEmpty) return;
     final liste = List<Mesaj>.from(widget.sohbet.mesajlar.value)..add(Mesaj(t, true));
     widget.sohbet.mesajlar.value = liste;
