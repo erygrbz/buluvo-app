@@ -34,7 +34,6 @@ jobs:
           flutter pub add webview_flutter_android
           flutter pub add in_app_purchase
           flutter pub add url_launcher
-          flutter pub add file_picker
 
       - name: Android permissions (INTERNET + Play Billing)
         working-directory: app
