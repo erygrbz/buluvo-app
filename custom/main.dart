@@ -15,7 +15,6 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:file_picker/file_picker.dart';
 
 const String kSite = 'https://buluvo.com';
 const String kUa =
@@ -92,7 +91,6 @@ class _WebShellState extends State<WebShell> {
     if (c.platform is AndroidWebViewController) {
       final a = c.platform as AndroidWebViewController;
       a.setMediaPlaybackRequiresUserGesture(false);
-      a.setOnShowFileSelector(_dosyaSec);
     }
     _c = c;
   }
@@ -116,22 +114,6 @@ class _WebShellState extends State<WebShell> {
       }
     } catch (_) {}
     return NavigationDecision.prevent;
-  }
-
-  Future<List<String>> _dosyaSec(FileSelectorParams params) async {
-    try {
-      final res = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        allowMultiple: params.mode == FileSelectorMode.openMultiple,
-      );
-      if (res == null) return <String>[];
-      return res.files
-          .where((f) => f.path != null)
-          .map((f) => Uri.file(f.path!).toString())
-          .toList();
-    } catch (_) {
-      return <String>[];
-    }
   }
 
   // ---------------- Google Play Billing ----------------
