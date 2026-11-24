@@ -26,11 +26,11 @@ jobs:
         run: flutter create --org com.buluvo --project-name buluvo --platforms=android .
 
       - name: Paketleri ekle
-        run: flutter pub add webview_flutter shared_preferences http
+        run: flutter pub add webview_flutter webview_flutter_android in_app_purchase url_launcher
 
-      - name: İnternet izni (ŞART)
+      - name: İzinler (INTERNET + Play Billing)
         run: |
-          sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
+          sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="com.android.vending.BILLING"/>\n    <application#' android/app/src/main/AndroidManifest.xml
 
       - name: Paket adını com.buluvo.app yap (mevcut Play listesiyle aynı)
         run: |
@@ -40,10 +40,10 @@ jobs:
               s = open(f).read()
               s = s.replace('com.buluvo.buluvo', 'com.buluvo.app')
               open(f, 'w').write(s)
-              print('paket güncellendi:', f)
+              print('paket guncellendi:', f)
           PY
 
-      - name: İmza anahtarını hazırla (GitHub Secrets'tan)
+      - name: Imza anahtarini hazirla (GitHub Secrets'tan)
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/upload.keystore
           cat > android/key.properties <<EOF
@@ -54,7 +54,7 @@ jobs:
           EOF
           echo "keystore boyutu:"; wc -c < android/app/upload.keystore
 
-      - name: build.gradle imza yapılandır
+      - name: build.gradle imza yapilandir
         run: |
           python3 - <<'PY'
           import glob, sys
@@ -62,7 +62,6 @@ jobs:
           groovy = glob.glob('android/app/build.gradle')
           if kts:
               f = kts[0]; s = open(f).read()
-              # props + signingConfigs, hepsi 'android {' noktasına; plugins{} ÖNCESİNE statement KOYMA
               props = ('val keystoreProperties = java.util.Properties()\n'
                        'val keystorePropertiesFile = rootProject.file("key.properties")\n'
                        'if (keystorePropertiesFile.exists()) { java.io.FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) } }\n\n')
@@ -96,16 +95,16 @@ jobs:
               s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
               open(f, 'w').write(s); print('Groovy imza eklendi')
           else:
-              print('build.gradle bulunamadı'); sys.exit(1)
+              print('build.gradle bulunamadi'); sys.exit(1)
           PY
 
-      - name: Kendi ekranımız
+      - name: Kendi ekranimiz
         run: cp custom/main.dart lib/main.dart
 
-      - name: AAB derle (imzalı release)
+      - name: AAB derle (imzali release)
         run: flutter build appbundle --release --build-number=1000 --build-name=2.0.0
 
-      - name: AAB'yi yükle
+      - name: AAB'yi yukle
         uses: actions/upload-artifact@v4
         with:
           name: buluvo-aab
