@@ -18,9 +18,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Flutter
+      - name: Setup Flutter 3.24.5 (bilinen-çalışan sürüm)
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.24.5'
           channel: stable
 
       - name: Create base project
@@ -41,12 +42,12 @@ jobs:
       - name: Inject app code
         run: cp custom/main.dart app/lib/main.dart
 
-      - name: Build release APK
+      - name: Build debug APK (imza gerektirmez — test kurulumu)
         working-directory: app
-        run: flutter build apk --release
+        run: flutter build apk --debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: buluvo-apk
-          path: app/build/app/outputs/flutter-apk/app-release.apk
+          path: app/build/app/outputs/flutter-apk/app-debug.apk
