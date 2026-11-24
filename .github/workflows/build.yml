@@ -24,9 +24,7 @@ jobs:
           channel: stable
 
       - name: Create base project
-        run: |
-          flutter create --org com.buluvo --project-name buluvo_app --platforms=android app
-          echo "project created"
+        run: flutter create --org com.buluvo --project-name buluvo_app --platforms=android app
 
       - name: Add dependencies
         working-directory: app
@@ -37,51 +35,24 @@ jobs:
           flutter pub add url_launcher
           flutter pub add file_picker
 
-      - name: Configure Android (applicationId, minSdk, version)
-        working-directory: app
-        run: |
-          GRADLE=android/app/build.gradle
-          # applicationId → com.buluvo.app (Play listesiyle aynı)
-          sed -i 's/applicationId "com.buluvo.buluvo_app"/applicationId "com.buluvo.app"/' $GRADLE
-          sed -i 's/applicationId = "com.buluvo.buluvo_app"/applicationId = "com.buluvo.app"/' $GRADLE
-          sed -i 's/applicationId "com.buluvo.buluvoApp"/applicationId "com.buluvo.app"/' $GRADLE
-          # minSdk 21 (webview + billing)
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' $GRADLE
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' $GRADLE
-          sed -i 's/minSdk flutter.minSdkVersion/minSdk 21/' $GRADLE
-          echo "----- build.gradle (app) -----"
-          cat $GRADLE | grep -E "applicationId|minSdk" || true
-
-      - name: Add Android permissions (INTERNET + Play Billing)
+      - name: Android permissions (INTERNET + Play Billing)
         working-directory: app
         run: |
           MAN=android/app/src/main/AndroidManifest.xml
-          # INTERNET + BILLING izinleri (manifest tag'inden hemen sonra)
-          sed -i 's#<manifest\(.*\)>#<manifest\1>\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="com.android.vending.BILLING"/>#' $MAN
-          echo "----- manifest head -----"
-          head -n 12 $MAN
+          # İzinleri <application etiketinden hemen önce ekle (her manifestte <application vardır)
+          sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="com.android.vending.BILLING"/>\n    <application#' "$MAN"
+          echo "----- AndroidManifest.xml (ilk satırlar) -----"
+          sed -n '1,14p' "$MAN"
 
       - name: Inject app code
-        run: |
-          cp custom/main.dart app/lib/main.dart
-          echo "main.dart copied"
+        run: cp custom/main.dart app/lib/main.dart
 
       - name: Build release APK (debug-signed — test kurulumu için)
         working-directory: app
         run: flutter build apk --release
-
-      - name: Build AAB (Play yüklemesi için — imzasız/debug)
-        working-directory: app
-        run: flutter build appbundle --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: buluvo-apk
           path: app/build/app/outputs/flutter-apk/app-release.apk
-
-      - name: Upload AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: buluvo-aab
-          path: app/build/app/outputs/bundle/release/app-release.aab
