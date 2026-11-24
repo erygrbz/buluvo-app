@@ -32,15 +32,16 @@ jobs:
         run: |
           sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="com.android.vending.BILLING"/>\n    <application#' android/app/src/main/AndroidManifest.xml
 
-      - name: Paket adını com.buluvo.app yap (mevcut Play listesiyle aynı)
+      - name: Paket adı com.buluvo.app + minSdk 24 (Play şartı)
         run: |
           python3 - <<'PY'
           import glob
           for f in glob.glob('android/app/build.gradle.kts') + glob.glob('android/app/build.gradle'):
               s = open(f).read()
               s = s.replace('com.buluvo.buluvo', 'com.buluvo.app')
+              s = s.replace('flutter.minSdkVersion', '24')
               open(f, 'w').write(s)
-              print('paket guncellendi:', f)
+              print('paket + minSdk 24 guncellendi:', f)
           PY
 
       - name: Imza anahtarini hazirla (GitHub Secrets'tan)
