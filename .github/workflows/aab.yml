@@ -35,13 +35,19 @@ jobs:
       - name: Paket adı com.buluvo.app + minSdk 24 (Play şartı)
         run: |
           python3 - <<'PY'
-          import glob
+          import glob, re
           for f in glob.glob('android/app/build.gradle.kts') + glob.glob('android/app/build.gradle'):
               s = open(f).read()
               s = s.replace('com.buluvo.buluvo', 'com.buluvo.app')
               s = s.replace('flutter.minSdkVersion', '24')
+              s = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 24', s)
+              s = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 24', s)
+              s = re.sub(r'minSdk\s+\d+', 'minSdk 24', s)
               open(f, 'w').write(s)
-              print('paket + minSdk 24 guncellendi:', f)
+              print('guncellendi:', f)
+              for l in s.splitlines():
+                  if 'minsdk' in l.lower():
+                      print('  >>>', l.strip())
           PY
 
       - name: Imza anahtarini hazirla (GitHub Secrets'tan)
