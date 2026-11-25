@@ -12,16 +12,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
-      - name: Setup Flutter 3.24.5 (bilinen-çalışan sürüm)
+      - name: Setup Flutter 3.50.1 (aab.yml ile ayni)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
+          flutter-version: '3.50.1'
           channel: stable
 
       - name: Create base project
@@ -34,6 +34,7 @@ jobs:
           flutter pub add webview_flutter_android
           flutter pub add in_app_purchase
           flutter pub add url_launcher
+          flutter pub add image_picker
 
       - name: Android permissions (INTERNET + Play Billing)
         working-directory: app
