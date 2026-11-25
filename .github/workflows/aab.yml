@@ -10,11 +10,11 @@ jobs:
       - name: Kodu al
         uses: actions/checkout@v4
 
-      - name: Java 17 kur
+      - name: Java 21 kur (yeni Android Lint, List.removeLast() icin JDK 21 ister)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Flutter kur (3.50.1 — Play API 36 + Billing 8 şartını karşılayan, test edilmiş sürüm)
         uses: subosito/flutter-action@v2
