@@ -1,0 +1,188 @@
+name: Buluvo AAB (imzalı - Play)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v4
+
+      - name: Java 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter kur (3.50.1 — Play API 36 + Billing 8 şartını karşılayan, test edilmiş sürüm)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+
+      - name: Flutter sürümü (yeşil olunca bu sürüme sabitlenebilir)
+        run: flutter --version
+
+      - name: Proje iskeleti
+        run: flutter create --org com.buluvo --project-name buluvo --platforms=android .
+
+      - name: Paketleri ekle
+        run: flutter pub add webview_flutter webview_flutter_android in_app_purchase url_launcher
+
+      - name: Play Billing Library surumu kontrolu (Play sarti >= 8.0.0)
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys, glob
+          cfg = json.load(open('.dart_tool/package_config.json'))
+          root = None
+          for p in cfg['packages']:
+              if p['name'] == 'in_app_purchase_android':
+                  root = p['rootUri']
+          if not root:
+              print('HATA: in_app_purchase_android cozumlenmedi'); sys.exit(1)
+          root = root.replace('file://', '')
+          if not os.path.isabs(root):
+              root = os.path.normpath(os.path.join('.dart_tool', root))
+          print('in_app_purchase_android:', os.path.basename(root.rstrip('/')))
+          vers = []
+          for f in glob.glob(os.path.join(root, 'android', 'build.gradle*')):
+              for m in re.finditer(r'com\.android\.billingclient:billing(?:-ktx)?:([\d.]+)', open(f).read()):
+                  vers.append(m.group(1))
+          print('Play Billing Library:', vers)
+          if not vers:
+              print('UYARI: billing surumu okunamadi, devam'); sys.exit(0)
+          if any(int(v.split('.')[0]) < 8 for v in vers):
+              print('HATA: Play Billing Library < 8.0.0 — Play kabul etmez. Daha yeni Flutter/in_app_purchase gerekli.'); sys.exit(1)
+          print('OK: Billing >= 8')
+          PY
+
+      - name: Izinler (INTERNET + Play Billing)
+        run: |
+          sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="com.android.vending.BILLING"/>\n    <application#' android/app/src/main/AndroidManifest.xml
+
+      - name: Paket adi com.buluvo.app + minSdk 24 + compileSdk/targetSdk 36 (Play sarti)
+        run: |
+          python3 - <<'PY'
+          import glob, re, sys
+          files = glob.glob('android/app/build.gradle.kts') + glob.glob('android/app/build.gradle')
+          if not files:
+              print('HATA: app build.gradle bulunamadi'); sys.exit(1)
+          for f in files:
+              s = open(f).read()
+              s = s.replace('com.buluvo.buluvo', 'com.buluvo.app')
+              s = s.replace('flutter.minSdkVersion', '24')
+              s = s.replace('flutter.targetSdkVersion', '36')
+              s = s.replace('flutter.compileSdkVersion', '36')
+              s = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 24', s)
+              s = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 24', s)
+              s = re.sub(r'minSdk\s+\d+', 'minSdk 24', s)
+              s = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 36', s)
+              s = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 36', s)
+              s = re.sub(r'targetSdk\s+\d+', 'targetSdk 36', s)
+              s = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 36', s)
+              s = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', s)
+              s = re.sub(r'compileSdk\s+\d+', 'compileSdk 36', s)
+              open(f, 'w').write(s)
+              print('guncellendi:', f)
+              for l in s.splitlines():
+                  if re.search(r'(minSdk|targetSdk|compileSdk|applicationId)', l): print('  >>>', l.strip())
+              if not re.search(r'targetSdk(Version)?\s*=?\s*36', s):
+                  print('HATA: targetSdk 36 uygulanamadi'); sys.exit(1)
+              if not re.search(r'minSdk(Version)?\s*=?\s*24', s):
+                  print('HATA: minSdk 24 uygulanamadi'); sys.exit(1)
+          PY
+          # Eski AGP ise compileSdk 36 uyarisini bastir (zararsiz)
+          echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
+
+      - name: Android SDK 36 bilesenleri (eksikse indir)
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKM" ]; then
+            yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+            "$SDKM" "platforms;android-36" >/dev/null 2>&1 || true
+          fi
+          ls "$ANDROID_HOME/platforms" || true
+
+      - name: Imza anahtarini hazirla (GitHub Secrets'tan)
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/upload.keystore
+          cat > android/key.properties <<EOF
+          storePassword=${{ secrets.STORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=upload.keystore
+          EOF
+          echo "keystore boyutu:"; wc -c < android/app/upload.keystore
+
+      - name: build.gradle imza yapilandir
+        run: |
+          python3 - <<'PY'
+          import glob, sys, re
+          kts = glob.glob('android/app/build.gradle.kts')
+          groovy = glob.glob('android/app/build.gradle')
+          if kts:
+              f = kts[0]; s = open(f).read()
+              # Kotlin DSL'de "java.util" yazilamaz ("java" eklenti uzantisiyla karisir) -> import kullan
+              imports = 'import java.util.Properties\nimport java.io.FileInputStream\n\n'
+              props = ('val keystoreProperties = Properties()\n'
+                       'val keystorePropertiesFile = rootProject.file("key.properties")\n'
+                       'if (keystorePropertiesFile.exists()) { FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) } }\n\n')
+              sign = ('android {\n'
+                      '    signingConfigs {\n'
+                      '        create("release") {\n'
+                      '            keyAlias = keystoreProperties["keyAlias"] as String\n'
+                      '            keyPassword = keystoreProperties["keyPassword"] as String\n'
+                      '            storeFile = file(keystoreProperties["storeFile"] as String)\n'
+                      '            storePassword = keystoreProperties["storePassword"] as String\n'
+                      '        }\n'
+                      '    }')
+              s = s.replace('android {', props + sign, 1)
+              if 'import java.util.Properties' not in s:
+                  s = imports + s
+              s = re.sub(r'signingConfig\s*=\s*signingConfigs\.getByName\("debug"\)', 'signingConfig = signingConfigs.getByName("release")', s)
+              open(f, 'w').write(s); print('KTS imza eklendi')
+          elif groovy:
+              f = groovy[0]; s = open(f).read()
+              props = ('def keystoreProperties = new Properties()\n'
+                       'def keystorePropertiesFile = rootProject.file("key.properties")\n'
+                       'if (keystorePropertiesFile.exists()) { keystorePropertiesFile.withInputStream { keystoreProperties.load(it) } }\n\n')
+              sign = ('android {\n'
+                      '    signingConfigs {\n'
+                      '        release {\n'
+                      '            keyAlias keystoreProperties["keyAlias"]\n'
+                      '            keyPassword keystoreProperties["keyPassword"]\n'
+                      '            storeFile file(keystoreProperties["storeFile"])\n'
+                      '            storePassword keystoreProperties["storePassword"]\n'
+                      '        }\n'
+                      '    }')
+              s = s.replace('android {', props + sign, 1)
+              s = re.sub(r'signingConfig\s*=?\s*signingConfigs\.debug', 'signingConfig = signingConfigs.release', s)
+              open(f, 'w').write(s); print('Groovy imza eklendi')
+          else:
+              print('build.gradle bulunamadi'); sys.exit(1)
+          # DOGRULAMA: release gercekten release anahtarina bagli mi? Degilse DUR.
+          s = open(f).read()
+          print('--- signingConfig satirlari ---')
+          for l in s.splitlines():
+              if 'signingConfig' in l: print('  >>>', l.strip())
+          if 'signingConfigs.release' not in s and 'getByName("release")' not in s:
+              print('HATA: release imza yapilandirmasi eklenemedi!'); sys.exit(1)
+          if re.search(r'signingConfig\s*=?\s*signingConfigs\.(debug\b|getByName\("debug"\))', s):
+              print('HATA: release build hala DEBUG anahtariyla imzalaniyor!'); sys.exit(1)
+          print('OK: release build upload keystore ile imzalanacak')
+          PY
+
+      - name: Kendi ekranimiz
+        run: cp custom/main.dart lib/main.dart
+
+      - name: AAB derle (imzali release, versionCode 1001)
+        run: flutter build appbundle --release --build-number=1001 --build-name=2.0.1
+
+      - name: AAB'yi yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: buluvo-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
