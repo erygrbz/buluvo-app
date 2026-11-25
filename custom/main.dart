@@ -15,6 +15,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
 
 const String kSite = 'https://buluvo.com';
 const String kUa =
@@ -91,8 +92,30 @@ class _WebShellState extends State<WebShell> {
     if (c.platform is AndroidWebViewController) {
       final a = c.platform as AndroidWebViewController;
       a.setMediaPlaybackRequiresUserGesture(false);
+      // <input type="file"> → galeri / kamera (profil fotoğrafı yükleme)
+      a.setOnShowFileSelector(_dosyaSec);
     }
     _c = c;
+  }
+
+  Future<List<String>> _dosyaSec(FileSelectorParams params) async {
+    try {
+      final picker = ImagePicker();
+      if (params.isCaptureEnabled) {
+        final x = await picker.pickImage(
+            source: ImageSource.camera, imageQuality: 85, maxWidth: 1600);
+        return x == null ? <String>[] : <String>[Uri.file(x.path).toString()];
+      }
+      if (params.mode == FileSelectorMode.openMultiple) {
+        final xs = await picker.pickMultiImage(imageQuality: 85, maxWidth: 1600);
+        return xs.map((x) => Uri.file(x.path).toString()).toList();
+      }
+      final x = await picker.pickImage(
+          source: ImageSource.gallery, imageQuality: 85, maxWidth: 1600);
+      return x == null ? <String>[] : <String>[Uri.file(x.path).toString()];
+    } catch (_) {
+      return <String>[];
+    }
   }
 
   FutureOr<NavigationDecision> _navKarar(NavigationRequest req) async {
