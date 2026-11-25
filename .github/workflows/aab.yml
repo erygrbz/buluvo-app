@@ -29,7 +29,7 @@ jobs:
         run: flutter create --org com.buluvo --project-name buluvo --platforms=android .
 
       - name: Paketleri ekle
-        run: flutter pub add webview_flutter webview_flutter_android in_app_purchase url_launcher
+        run: flutter pub add webview_flutter webview_flutter_android in_app_purchase url_launcher image_picker
 
       - name: Play Billing Library surumu kontrolu (Play sarti >= 8.0.0)
         run: |
@@ -177,8 +177,8 @@ jobs:
       - name: Kendi ekranimiz
         run: cp custom/main.dart lib/main.dart
 
-      - name: AAB derle (imzali release, versionCode 1001)
-        run: flutter build appbundle --release --build-number=1001 --build-name=2.0.1
+      - name: AAB derle (imzali release, versionCode 1002)
+        run: flutter build appbundle --release --build-number=1002 --build-name=2.0.2
 
       - name: AAB'yi yukle
         uses: actions/upload-artifact@v4
